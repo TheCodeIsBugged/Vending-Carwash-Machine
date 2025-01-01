@@ -1,6 +1,10 @@
 // C++ code
 
-#include <Adafruit_LiquidCrystal.h>
+# include <LiquidCrystal_I2C.h>
+
+# define I2C_ADDR    0x27
+# define LCD_COLUMNS 16
+# define LCD_LINES   4
 
 int balance = 0;
 const int cost = 5;
@@ -28,14 +32,16 @@ bool hasFoamTime = false;
 // Variables for toggle
 int buttonState;
 int prevButtonState = 0;
-unsigned long toggleTime = 0;
-unsigned long debounce = 200UL;
+byte buttonPins[5] = {2, 3, 4, 5, 6};
+byte buttonStates[5];
+byte prevButtonStates[5] = {0, 0, 0, 0, 0};
+unsigned long debounceStart[5] = {0, 0, 0, 0, 0};
+const unsigned long debounceDelay = 50;
 
 // Millis() variables
 unsigned long currentMillis;
 unsigned long startWaterMillis;
 unsigned long startFoamMillis;
-
 const unsigned long second = 1000UL;
 const unsigned long minute = second * 60;
 const unsigned long waterTime = minute * 2;
@@ -51,22 +57,22 @@ long displayFoamTime = 0;
 enum MachineState {IDLE, SELECTION, WATER, FOAM};
 MachineState state;
 
-Adafruit_LiquidCrystal lcd(0);
+LiquidCrystal_I2C lcd(I2C_ADDR, LCD_COLUMNS, LCD_LINES);
 
 void setup()
 {
   // Serial
   Serial.begin(115200);
+
   //Intialize the LCD
-  lcd.begin(16, 2);
-  
+  lcd.init();
+
   //Set the pin of coinButtons
-  pinMode(coinPin_1, INPUT);
-  pinMode(coinPin_5, INPUT);
-  pinMode(coinPin_10, INPUT);
   // Set the pin of water and foam button
-  pinMode(waterPin, INPUT);
-  pinMode(foamPin, INPUT);
+  for(int buttonPin: buttonPins)
+  {
+    pinMode(buttonPin, INPUT);
+  }
   
   // Set the pin of relay
   pinMode(relayPin_Motor, OUTPUT);
@@ -79,8 +85,7 @@ void setup()
 void loop()
 {
   currentMillis = millis();
-  balance = AddCoinTo(balance);
-  ReadWaterButton(waterPin);
+  ReadDebounceButton();
   HandleMachineState();
 }
 
@@ -170,72 +175,96 @@ int AddCoinTo(int bal)
 // TO-DO: Convert this method to be reused with different buttons in the circuit
 // As buttons results to different output, converting this to reusable debounce button method is a challenge
 // May abstract the switch case?
-void ReadWaterButton(int pin)
-{
-  int reading = digitalRead(pin);
-  if(reading != prevButtonState)
+void ReadDebounceButton(){
+  for(int currentButton = 0; currentButton < sizeof(buttonPins); currentButton++)
   {
-    toggleTime = currentMillis;
-  }
-  
-  if(currentMillis - toggleTime > debounce)
-  {
-    if(reading != buttonState)
-    {
-      buttonState = reading;
-      if(buttonState == 1)
-      {
-        // lcd.clear causes the togglepumpwater to fail if there's no delay
-        // TO-DO: Research on how to solve the lcd.clear without using a delay in the sketch
-        lcd.clear();
-        delay(50);
-        switch(state)
-        {
-          // Display the insufficient balance instruction, balance < 0
-          case IDLE:
-          DisplayInsufficient();
-          break;
-          
-          // Initialize the pump water function if there's no water time left
-          // Toggle the pump water, on and off, if there's still water time left
-          case SELECTION:
-          if(!hasWaterTime)
+    int reading = digitalRead(buttonPins[currentButton]);
+
+    if (reading != prevButtonStates[currentButton]) {
+      debounceStart[currentButton] = currentMillis;
+    }
+
+    if ((currentMillis - debounceStart[currentButton]) > debounceDelay) {
+      if (reading != buttonStates[currentButton]) {
+        buttonStates[currentButton] = reading;
+        if (buttonStates[currentButton] == 1) {
+          lcd.clear();
+          switch(buttonPins[currentButton])
           {
-            balance -= cost;
-            waterTimeLeft = waterTime;
-            startWaterMillis = currentMillis;
-            isWatering = true;
-            hasWaterTime = true;
-            state = WATER;
+            case 2:
+            Serial.println(F("1-peso Button Pressed"));
+            balance += 1;
+            break;
+            
+            case 3:
+            Serial.println(F("5-pesos Button Pressed"));
+            balance += 5;
+            break;
+
+            case 4:
+            Serial.println(F("10-pesos Button Pressed"));
+            balance += 10;
+            break;
+            
+            case 5:
+            Serial.println(F("Water Button Pressed"));
+            WaterButtonOutputs();
+            break;
+            
+            case 6:
+            Serial.println(F("Foam Button Pressed"));
+            break;
+            
+            default:
+            Serial.println(F("No button was read"));
           }
-          else if(hasWaterTime)
-          {
-            TogglePumpWater();
-            state = WATER;
-          }
-          break;
-          
-          // Put an if statement? hasWaterTime?
-          case WATER:
-          TogglePumpWater();
-          state = SELECTION;
-          break;
-          
-          // Transition to WATER state. As well as, pause the pump foam
-          // TO-DO: Toggle the pump foam function
-          case FOAM:
-          // state = WATER;
-          // TogglePumpFoam();
-          break;
-          
-          default:
-          state = IDLE;
         }
-        Serial.println(balance);
       }
     }
+    prevButtonStates[currentButton] = reading;
   }
-  prevButtonState = reading;
+} 
+
+void WaterButtonOutputs()
+{
+  switch(state)
+  {
+    case IDLE:
+    DisplayInsufficient();
+    // TO-DO: Search for better solution instead of using delay in lcd displa, use millis() instead?
+    delay(second);
+    break;
+
+    case SELECTION:
+    if(!hasWaterTime)
+    {
+      balance -= cost;
+      waterTimeLeft = waterTime;
+      startWaterMillis = currentMillis;
+      isWatering = true;
+      hasWaterTime = true;
+      state = WATER;
+    }
+    else if(hasWaterTime)
+    {
+      TogglePumpWater();
+      state = WATER;
+    }
+    break;
+
+    case WATER:
+    TogglePumpWater();
+    state = SELECTION;
+    break;
+
+    case FOAM:
+    // state = WATER;
+    // TogglePumpFoam();
+    break;
+
+    default:
+    state = IDLE;
+  }
 }
 
 // Method to pump water
