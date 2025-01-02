@@ -4,7 +4,7 @@
 
 # define I2C_ADDR    0x27
 # define LCD_COLUMNS 16
-# define LCD_LINES   4
+# define LCD_LINES   2
 
 int balance = 0;
 const int cost = 5;
@@ -202,24 +202,37 @@ void WaterButtonOutputs()
     case IDLE:
     DisplayInsufficient();
     // TO-DO: Search for better solution instead of using delay in lcd displa, use millis() instead?
-    delay(second);
+    delay(second / 2);
     break;
 
     case SELECTION:
-    if(!hasWaterTime)
+    if(balance >= cost)
     {
-      balance -= cost;
-      waterTimeLeft = waterTime;
-      startWaterMillis = currentMillis;
-      isWatering = true;
-      hasWaterTime = true;
-      state = WATER;
+      if(!hasWaterTime)
+      {
+        balance -= cost;
+        waterTimeLeft = waterTime;
+        startWaterMillis = currentMillis;
+        isWatering = true;
+        hasWaterTime = true;
+        state = WATER;
+      }
     }
-    else if(hasWaterTime)
+    else if(balance < cost)
     {
-      TogglePumpWater();
-      state = WATER;
+      if(hasWaterTime)
+      {
+        TogglePumpWater();
+        state = WATER;
+      }
+      else
+      {
+        DisplayInsufficient();
+        delay(second / 2);
+        lcd.clear();
+      }
     }
+    
     break;
 
     case WATER:
@@ -232,20 +245,34 @@ void WaterButtonOutputs()
     TogglePumpFoam();
     PumpFoam(); // Call the PumpFoam again to turn off the relay before transitioning to WATER state
 
-    if(!hasWaterTime)
+    if(balance >= cost)
     {
-      balance -= cost;
-      waterTimeLeft = waterTime;
-      startWaterMillis = currentMillis;
-      isWatering = true;
-      hasWaterTime = true;
-      state = WATER;
+      if(!hasWaterTime)
+      {
+        balance -= cost;
+        waterTimeLeft = waterTime;
+        startWaterMillis = currentMillis;
+        isWatering = true;
+        hasWaterTime = true;
+        state = WATER;
+      }
     }
-    else if(hasWaterTime)
+    else if(balance < cost)
     {
-      TogglePumpWater();
-      state = WATER;
+      if(hasWaterTime)
+      {
+        TogglePumpWater();
+        state = WATER;
+      }
+      else
+      {
+        DisplayInsufficient();
+        delay(second / 2);
+        lcd.clear();
+        state = IDLE;
+      }
     }
+    
     break;
 
     default:
@@ -265,38 +292,65 @@ void FoamButtonOutputs()
     break;
 
     case SELECTION:
-    if(!hasFoamTime)
+    if(balance >= cost)
     {
-      balance -= cost;
-      foamTimeLeft = foamTime;
-      startFoamMillis = currentMillis;
-      isFoaming = true;
-      hasFoamTime = true;
-      state = FOAM;
+      if(!hasFoamTime)
+      {
+        balance -= cost;
+        foamTimeLeft = foamTime;
+        startFoamMillis = currentMillis;
+        isFoaming = true;
+        hasFoamTime = true;
+        state = FOAM;
+      }
     }
-    else if(hasFoamTime)
+    else if(balance < cost)
     {
-      TogglePumpFoam();
-      state = FOAM;
+      if(hasFoamTime)
+      {
+        TogglePumpFoam();
+        state = FOAM;
+      }
+      else
+      {
+        DisplayInsufficient();
+        delay(second / 2);
+        lcd.clear();
+      }
     }
+    
     break;
 
     case WATER:
     TogglePumpWater();      
     PumpWater(); // Call the PumpWater again to turn off the relay before transitioning to FOAM state
-    if(!hasFoamTime)
+
+    if(balance >= cost)
     {
-      balance -= cost;
-      foamTimeLeft = foamTime;
-      startFoamMillis = currentMillis;
-      isFoaming = true;
-      hasFoamTime = true;
-      state = FOAM;
+      if(!hasFoamTime)
+      {
+        balance -= cost;
+        foamTimeLeft = foamTime;
+        startFoamMillis = currentMillis;
+        isFoaming = true;
+        hasFoamTime = true;
+        state = FOAM;
+      }
     }
-    else if(hasFoamTime)
+    else if(balance < cost)
     {
-      TogglePumpFoam();
-      state = FOAM;
+      if(hasFoamTime)
+      {
+        TogglePumpFoam();
+        state = FOAM;
+      }
+      else
+      {
+        DisplayInsufficient();
+        delay(second / 2);
+        lcd.clear();
+        state = IDLE;
+      }
     }
     break;
 
