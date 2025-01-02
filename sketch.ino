@@ -9,15 +9,6 @@
 int balance = 0;
 const int cost = 5;
 
-// Pin and Button for coins, replacement for the coin slot
-int coinPin_1 = 2;
-int coinPin_5 = 3;
-int coinPin_10 = 4;
-
-// Pin and Button for water and foam function
-int waterPin = 5;
-int foamPin = 6;
-
 // Pin for relay, to be connected to solenoid valve and solid state relay?
 int relayPin_Motor = 9;
 int relayPin_SolenoidValve = 10;
@@ -44,8 +35,8 @@ unsigned long startWaterMillis;
 unsigned long startFoamMillis;
 const unsigned long second = 1000UL;
 const unsigned long minute = second * 60;
-const unsigned long waterTime = minute * 2;
-const unsigned long foamTime = minute;  
+const unsigned long waterTime = minute / 5;
+const unsigned long foamTime = minute / 5;  
 unsigned long elapsedWaterTime;
 unsigned long elapsedFoamTime;
 unsigned long waterTimeLeft = 0;
@@ -142,39 +133,16 @@ void HandleMachineState()
     break;
     
     case FOAM:
-    Serial.println(F("FOAM"));
+    PumpFoam();
+    DisplayBalance(balance);
     break;
   }
-}
-
-// Read and Add inserted coins to the balance
-int AddCoinTo(int bal)
-{
-  if(digitalRead(coinPin_1) == 1)
-  {
-    bal += 1;
-    Serial.print(F("BALANCE: P"));
-    Serial.println(bal);
-  }
-  if(digitalRead(coinPin_5) == 1)
-  {
-    bal += 5;
-    Serial.print(F("BALANCE: P"));
-    Serial.println(bal);
-  }
-  if(digitalRead(coinPin_10) == 1)
-  {
-    bal += 10;
-    Serial.print(F("BALANCE: P"));
-    Serial.println(bal);
-  }
-  return bal;
 }
 
 // Read and debounce the water button
 // TO-DO: Convert this method to be reused with different buttons in the circuit
 // As buttons results to different output, converting this to reusable debounce button method is a challenge
-// May abstract the switch case?
+// Abstract the switch case for different outputs?
 void ReadDebounceButton(){
   for(int currentButton = 0; currentButton < sizeof(buttonPins); currentButton++)
   {
@@ -213,6 +181,7 @@ void ReadDebounceButton(){
             
             case 6:
             Serial.println(F("Foam Button Pressed"));
+            FoamButtonOutputs();
             break;
             
             default:
@@ -225,6 +194,7 @@ void ReadDebounceButton(){
   }
 } 
 
+// Handles the diffrent outputs of pressed water button based on the current state of the machine
 void WaterButtonOutputs()
 {
   switch(state)
@@ -254,12 +224,86 @@ void WaterButtonOutputs()
 
     case WATER:
     TogglePumpWater();
+    PumpWater(); // Call the PumpWater again to turn off the relay before transitioning to SELECTION state
     state = SELECTION;
     break;
 
     case FOAM:
-    // state = WATER;
-    // TogglePumpFoam();
+    TogglePumpFoam();
+    PumpFoam(); // Call the PumpFoam again to turn off the relay before transitioning to WATER state
+
+    if(!hasWaterTime)
+    {
+      balance -= cost;
+      waterTimeLeft = waterTime;
+      startWaterMillis = currentMillis;
+      isWatering = true;
+      hasWaterTime = true;
+      state = WATER;
+    }
+    else if(hasWaterTime)
+    {
+      TogglePumpWater();
+      state = WATER;
+    }
+    break;
+
+    default:
+    state = IDLE;
+  }
+}
+
+// Handles the diffrent outputs of pressed foam button based on the current state of the machine
+void FoamButtonOutputs()
+{
+  switch(state)
+  {
+    case IDLE:
+    DisplayInsufficient();
+    // TO-DO: Search for better solution instead of using delay in lcd displa, use millis() instead?
+    delay(second);
+    break;
+
+    case SELECTION:
+    if(!hasFoamTime)
+    {
+      balance -= cost;
+      foamTimeLeft = foamTime;
+      startFoamMillis = currentMillis;
+      isFoaming = true;
+      hasFoamTime = true;
+      state = FOAM;
+    }
+    else if(hasFoamTime)
+    {
+      TogglePumpFoam();
+      state = FOAM;
+    }
+    break;
+
+    case WATER:
+    TogglePumpWater();      
+    PumpWater(); // Call the PumpWater again to turn off the relay before transitioning to FOAM state
+    if(!hasFoamTime)
+    {
+      balance -= cost;
+      foamTimeLeft = foamTime;
+      startFoamMillis = currentMillis;
+      isFoaming = true;
+      hasFoamTime = true;
+      state = FOAM;
+    }
+    else if(hasFoamTime)
+    {
+      TogglePumpFoam();
+      state = FOAM;
+    }
+    break;
+
+    case FOAM:
+    TogglePumpFoam();
+    PumpFoam(); // Call the PumpFoam again to turn off the relay before transitioning to SELECTION state
+    state = SELECTION;
     break;
 
     default:
@@ -285,7 +329,6 @@ void PumpWater()
       // Transition to the IDLE state after the countdown
       isWatering = false;
       hasWaterTime = false;
-      state == IDLE;
     }
     else if(elapsedWaterTime <= waterTimeLeft)
     {
@@ -299,11 +342,15 @@ void PumpWater()
   }
   else if(!isWatering)
   {
+    // This condition could not be read as the state transition to another state.
+    // Problem: Could not turn off the relay during paused countdown.
+    // Solution? Also call the PumpWater in selection state? Split the pumpwater into on and off of water pump?
     // Turn off the relay
     if(digitalRead(relayPin_Motor) == 1)
     {
       digitalWrite(relayPin_Motor, 0);
     }
+
     // Update the displayWaterTime based on waterTimeLeft;
     if(hasWaterTime)
     {
@@ -316,12 +363,14 @@ void PumpWater()
   if(hasWaterTime)
   {
     DisplayMinSec(0, 0, "WTR", displayWaterTime);
+    DisplayMinSec(9, 0, "FM", displayFoamTime);
   }
   else if(!hasWaterTime)
   {
     // Reset the waterTimeLeft and displayWaterTime after the countdown
     waterTimeLeft = 0;
     displayWaterTime = 0;
+    state = IDLE;
   }
 }
 
@@ -344,9 +393,85 @@ void TogglePumpWater()
 }
 
 // Method to pump foam
-void PumpFoam(){}
+void PumpFoam()
+{
+  // long displayFoamTime; Global variable?
+  if(isFoaming)
+  {
+    elapsedFoamTime = currentMillis - startFoamMillis;
+    if(elapsedFoamTime > foamTimeLeft)
+    { 
+      // Turn off the relay
+      if(digitalRead(relayPin_SolenoidValve) == 1)
+      {
+        digitalWrite(relayPin_SolenoidValve, 0);
+      }
+      // Reset the water event flags
+      // Transition to the IDLE state after the countdown
+      isFoaming = false;
+      hasFoamTime = false;
+    }
+    else if(elapsedFoamTime <= foamTimeLeft)
+    {
+      // Turn on the relay
+      if(digitalRead(relayPin_SolenoidValve) == 0)
+      {
+        digitalWrite(relayPin_SolenoidValve, 1);
+      }
+      displayFoamTime = foamTimeLeft - elapsedFoamTime;
+    }
+  }
+  else if(!isFoaming)
+  {
+    // This condition could not be read as the state transition to another state.
+    // Problem: Could not turn off the relay during paused countdown.
+    // Solution? Also call the PumpWater in selection state? Split the pump foam into on and off of water pump?
+    // Turn off the relay
+    if(digitalRead(relayPin_SolenoidValve) == 1)
+    {
+      digitalWrite(relayPin_SolenoidValve, 0);
+    }
+
+    // Update the displayFoamTime based on foamTimeLeft;
+    if(hasFoamTime)
+    {
+      displayFoamTime = foamTimeLeft;
+    }
+  }
+  
+  // Display water time left
+  // Display the foam time as well?
+  if(hasFoamTime)
+  {
+    DisplayMinSec(0, 0, "WTR", displayWaterTime);
+    DisplayMinSec(9, 0, "FM", displayFoamTime);
+  }
+  else if(!hasFoamTime)
+  {
+    // Reset the waterTimeLeft and displayWaterTime after the countdown
+    foamTimeLeft = 0;
+    displayFoamTime = 0;
+    state = IDLE;
+  }
+}
+
 // Play/Pause toggle of the pump foam and foam time countdown:
-void TogglePumpFoam(){}
+void TogglePumpFoam()
+{
+  isFoaming = !isFoaming;
+  if(isFoaming)
+  {
+    // Update the start millis of water countdown
+    startFoamMillis = currentMillis;
+    Serial.println(F("FOAM IS RUNNING"));
+  }
+  else if(!isFoaming)
+  {
+    // Update the water time left
+    foamTimeLeft -= elapsedFoamTime;
+    Serial.println(F("FOAM HAS STOPPED"));
+  }
+}
 
 // Display the milliseconds in minutes:seconds format
 void DisplayMinSec(int h, int v, String s, long time)
